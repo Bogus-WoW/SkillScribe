@@ -1,0 +1,15 @@
+## Interface: 16001, 120105
+## Title: SkillScribe
+## Notes: Cost per skill point for every recipe, plus a Plan window: what to learn next (trainer, AH, vendor, drops) and the cheapest route to your skill cap. Uses MarketScribe prices and Wowhead Forever recipe data.
+## Author: Adam
+## Version: 1.4.0
+## Dependencies: MarketScribe
+## SavedVariables: SkillScribeDB
+
+Core.lua
+UI.lua
+Recipes.lua
+Plan.lua
+Tooltip.lua
+PlanUI.lua
+Disenchant.lua
