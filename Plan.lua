@@ -28,6 +28,22 @@ ns.PROF_IDS = {
 ns.PROF_NAMES = {}
 for name, id in pairs(ns.PROF_IDS) do ns.PROF_NAMES[id] = name end
 
+-- Wowhead Forever gives no yellow/green thresholds for ~55 recipes (stones,
+-- rods, keys, leathers...): they arrive as 0/0. Taken literally the chance
+-- runs from 0 to grey, i.e. ~3% per craft, and the plan asks for hundreds of
+-- crafts. Estimate them from the grey level with the usual spacing (yellow 25
+-- below grey, green 12 below). ns.RecipeGuessed[r] marks them.
+ns.RecipeGuessed = {}
+for _, byRecipe in pairs(ns.RECIPES or {}) do
+	for _, r in pairs(byRecipe) do
+		if (r[2] or 0) == 0 and (r[3] or 0) == 0 and (r[4] or 0) > 0 then
+			r[2] = math.max(r[4] - 25, 1)
+			r[3] = math.max(r[4] - 12, 1)
+			ns.RecipeGuessed[r] = true
+		end
+	end
+end
+
 local function MS() return _G.MarketScribeAPI end
 
 function ns.MySide()
