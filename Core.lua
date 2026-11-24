@@ -428,6 +428,26 @@ SlashCmdList.SKILLSCRIBE = function(msg)
 		db.showGrey = not db.showGrey
 		ns.Print("grey recipes " .. (db.showGrey and "shown (unranked)." or "hidden."))
 		ns.Refresh()
+	elseif msg == "spec" or msg:match("^spec%s") then
+		local arg = (msg:match("^spec%s+(.-)%s*$") or ""):lower()
+		local prof = ns.db.planProf
+		if not (prof and ns.SPECS[prof]) then
+			ns.Print("Open the plan on Leatherworking or Engineering first (the specialization applies to the profession shown).")
+		elseif arg == "" then
+			local names = {}
+			for _, sp in ipairs(ns.SPECS[prof]) do names[#names + 1] = sp[2]:lower() end
+			ns.Print(("%s specialization: %s. Use /sks spec <%s|none>."):format(ns.PROF_NAMES[prof], ns.SpecName(prof) or "none", table.concat(names, "|")))
+		else
+			local sid, found = nil, (arg == "none")
+			for _, sp in ipairs(ns.SPECS[prof]) do
+				if sp[2]:lower() == arg then sid, found = sp[1], true end
+			end
+			if not found then ns.Print("Unknown specialization: " .. arg) else
+				ns.SetSpec(prof, sid)
+				ns.Print(ns.PROF_NAMES[prof] .. " specialization: " .. (ns.SpecName(prof) or "none") .. ".")
+				if ns.RefreshPlan then ns.RefreshPlan() end
+			end
+		end
 	elseif msg == "tooltip" then
 		db.craftTooltip = (db.craftTooltip == false)
 		ns.Print("\"Cost to craft\" line in item tooltips " .. (db.craftTooltip and "on." or "off."))
@@ -461,7 +481,7 @@ SlashCmdList.SKILLSCRIBE = function(msg)
 		end
 		ns.Print("no known recipe matches that.")
 	else
-		ns.Print("/sks (toggle panel), /sks plan (what to learn next), /sks de (disenchant window), /sks ahcap <n>, /sks ahstacks <n>, /sks ahage <days>, /sks unexclude, /sks bonus [percent|auto|add|mult] (Working Overtime skill-up bonus), /sks sort <best|raw|sell|de>, /sks chance <yellow|green> <percent>, /sks grey, /sks highlight, /sks debug <recipe>")
+		ns.Print("/sks (toggle panel), /sks plan (what to learn next), /sks de (disenchant window), /sks ahcap <n>, /sks ahstacks <n>, /sks ahage <days>, /sks unexclude, /sks bonus [percent|auto|add|mult] (Working Overtime skill-up bonus), /sks sort <best|raw|sell|de>, /sks chance <yellow|green> <percent>, /sks grey, /sks highlight, /sks spec [name|none], /sks debug <recipe>")
 	end
 end
 

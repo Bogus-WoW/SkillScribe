@@ -205,6 +205,10 @@ function ns.RecordTrainer()
 			end
 		end
 	end
+	if saved > 0 then
+		ns.ResetTrainerCoverage()
+		if ns.ClearPlanCache then ns.ClearPlanCache() end
+	end
 	return saved
 end
 
@@ -476,6 +480,82 @@ end
 local KIND_LABEL = { K = "Known", S = "Known", T = "Trainer", V = "Vendor", A = "AH", D = "Drop", Q = "Quest", U = "Unknown" }
 ns.KIND_LABEL = KIND_LABEL
 
+-- Wowhead lists a recipe as "learned from a trainer" without saying which
+-- trainer, so specialization recipes (Dragonscale, Goblin and Gnomish
+-- Engineering...) and other trainers' recipes look like ordinary trainer
+-- recipes. Every trainer window you open is saved (ns.db.trainer), so we know
+-- how far up each profession the trainers you have seen teach: a trainer
+-- recipe at or below that level that none of them offered is NOT taught by
+-- them, and the plan must not count on learning it there.
+local idProf, maxSeen
+local function TrainerCoverage()
+	if not idProf then
+		idProf = {}
+		for skill, byRecipe in pairs(ns.RECIPES or {}) do
+			for rid in pairs(byRecipe) do idProf[rid] = skill end
+		end
+	end
+	if not maxSeen then
+		maxSeen = {}
+		-- Compare like with like: the Wowhead level of the highest trainer recipe
+		-- a trainer has offered (the trainer's own requirement is on another scale).
+		for rid in pairs((ns.db and ns.db.trainer) or {}) do
+			local skill = idProf[rid]
+			local r = skill and ns.RECIPES[skill][rid]
+			if r then
+				for _, src in ipairs(r[9]) do
+					if src[1] == "T" and (src[2] or 0) > (maxSeen[skill] or 0) then maxSeen[skill] = src[2] end
+				end
+			end
+		end
+	end
+	return idProf, maxSeen
+end
+function ns.ResetTrainerCoverage() maxSeen = nil end
+
+-- Specialization recipes (Dragonscale/Elemental/Tribal Leatherworking, Goblin/Gnomish
+-- Engineering). Wowhead's Forever data marks them with a "specialization" field; they are
+-- taught by the specialty trainers, never by the ordinary profession trainers.
+-- Source: wowhead.com/forever/spells/professions/{leatherworking,engineering}, 23 Nov 2026.
+local SPEC_DEFS = {
+	[10656]={10619, 10650, 19050, 19054, 19060, 19077, 19085, 19089, 19094, 19107, 20855, 22926, 23708, 24654, 24655},
+	[10658]={10630, 10632, 16661, 16746, 19059, 19061, 19067, 19076, 19078, 19079, 19090, 19095, 19101, 20854, 22928, 23710, 26279},
+	[10660]={10621, 10647, 16650, 16728, 19053, 19062, 19063, 19066, 19068, 19073, 19074, 19080, 19081, 19084, 19086, 19087, 19097, 19104, 20853, 22927, 23709},
+	[20222]={8895, 12715, 12716, 12717, 12718, 12754, 12755, 12758, 12760, 12908, 13240, 15628, 23078, 23486},
+	[20219]={12759, 12895, 12897, 12899, 12902, 12903, 12905, 12906, 12907, 15633, 23096, 23129, 23489},
+}
+local SPEC_RECIPES = {}
+for sid, ids in pairs(SPEC_DEFS) do for _, rid in ipairs(ids) do SPEC_RECIPES[rid] = sid end end
+
+-- Specializations a profession can take, in the order the button cycles through them.
+ns.SPECS = {
+	[165] = { { 10656, "Dragonscale" }, { 10658, "Elemental" }, { 10660, "Tribal" } },
+	[202] = { { 20222, "Goblin" }, { 20219, "Gnomish" } },
+}
+function ns.SpecOf(prof)
+	local c = ns.Char()
+	return c.spec and c.spec[prof]
+end
+function ns.SpecName(prof)
+	local sid = ns.SpecOf(prof)
+	for _, sp in ipairs(ns.SPECS[prof] or {}) do if sp[1] == sid then return sp[2] end end
+end
+function ns.SetSpec(prof, sid)
+	local c = ns.Char()
+	c.spec = c.spec or {}
+	c.spec[prof] = sid
+	if ns.ClearPlanCache then ns.ClearPlanCache() end
+	if ns.ResetPlanLock then ns.ResetPlanLock(prof) end
+end
+
+local function NotAtSeenTrainers(id, level)
+	local prof, seen = TrainerCoverage()
+	local skill = prof[id]
+	if not skill then return false end
+	if ns.db.trainer and ns.db.trainer[id] then return false end
+	return seen[skill] ~= nil and (level or 0) <= seen[skill]
+end
+
 -- Returns the cheapest plannable way to learn it (or nil) and every way.
 local function LearnOptions(id, r, known)
 	local opts = {}
@@ -486,6 +566,16 @@ local function LearnOptions(id, r, known)
 	local api = MS()
 	local trainer = ns.db.trainer and ns.db.trainer[id]
 	local mySide = ns.MySide()
+	-- A specialization recipe is out of reach (by trainer, vendor pattern or AH pattern alike)
+	-- unless you have that specialization, or the game has already shown you the recipe.
+	local specOf = SPEC_RECIPES[id]
+	local mine = specOf and ns.SpecOf((TrainerCoverage())[id])
+	if specOf and specOf ~= mine and not trainer then
+		local lvl = r[9][1] and r[9][1][2] or 0
+		opts[1] = { kind = "U", level = lvl,
+			note = mine and "needs another specialization" or "needs a specialization (choose one with the Specialization button)" }
+		return nil, opts
+	end
 	for _, s in ipairs(r[9]) do
 		local k = s[1]
 		local side = (k == "V" and s[7]) or (k == "Q" and s[6]) or "B"
@@ -494,8 +584,16 @@ local function LearnOptions(id, r, known)
 		elseif k == "S" then
 			opts[#opts + 1] = { kind = "S", level = 1, cost = 0 }
 		elseif k == "T" then
-			opts[#opts + 1] = { kind = "T", level = (trainer and trainer.req) or s[2], cost = (trainer and trainer.cost) or s[3],
-				seen = trainer ~= nil, npc = trainer and trainer.npc }
+			if specOf and specOf == mine then
+				opts[#opts + 1] = { kind = "T", level = (trainer and trainer.req) or s[2], cost = (trainer and trainer.cost) or s[3],
+					seen = trainer ~= nil, npc = trainer and trainer.npc }
+			elseif NotAtSeenTrainers(id, s[2]) then
+				-- the trainers you've opened don't teach it (specialization or another trainer)
+				opts[#opts + 1] = { kind = "U", level = s[2], note = "not taught by the trainers you have opened" }
+			else
+				opts[#opts + 1] = { kind = "T", level = (trainer and trainer.req) or s[2], cost = (trainer and trainer.cost) or s[3],
+					seen = trainer ~= nil, npc = trainer and trainer.npc }
+			end
 		elseif k == "V" or k == "D" or k == "Q" then
 			local item = s[3]
 			if k == "V" then

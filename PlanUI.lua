@@ -12,6 +12,7 @@ local OUTPUT_ORDER = { "vendor", "ah", "smart" }
 local OUTPUT_LABEL = { vendor = "Crafts: vendor", ah = "Crafts: sell on AH", smart = "Crafts: Smart" }
 local rows, profButtons = {}, {}
 local current -- skill line shown
+local specBtn
 
 local FILTERS = { "all", "T", "A", "V", "D", "Q", "U" }
 local FILTER_LABEL = { all = "All sources", T = "Trainer", A = "On the AH", V = "Vendor", D = "Drop", Q = "Quest", U = "Unknown" }
@@ -87,10 +88,24 @@ local function OptionLine(o)
 	return o.kind
 end
 
+-- Hovering an item queues it for a MarketScribe scan when its AH price is too old
+-- to use (older than Smart's price-age limit). The scan runs next time you open the AH.
+local function QueueStale(id)
+	local api = ns.MS()
+	if not (api and api.QueueItemsForced and api.GetMarketPrice and id and id > 0) then return false end
+	local price, when = api.GetMarketPrice(id)
+	if not (price and when) then return false end
+	if (time() - when) <= (ns.db.ahMaxAge or 3) * 86400 then return false end
+	return api.QueueItemsForced({ id }) > 0
+end
+
 local function RecipeTooltip(row)
 	if row.item then
 		GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
 		GameTooltip:SetItemByID(row.item)
+		if QueueStale(row.item) then
+			GameTooltip:AddLine("Old AH price: queued for a MarketScribe scan (open the AH).", 0.4, 0.8, 1, true)
+		end
 		GameTooltip:Show()
 		return
 	end
@@ -165,6 +180,14 @@ local function RecipeTooltip(row)
 	end
 	if e.best and not e.known then
 		GameTooltip:AddLine("Cheapest: " .. OptionLine(e.best), 0.5, 1, 0.5, true)
+	end
+	local queued = 0
+	if QueueStale(r[5]) then queued = queued + 1 end
+	for i = 1, #reag, 2 do
+		if QueueStale(reag[i]) then queued = queued + 1 end
+	end
+	if queued > 0 then
+		GameTooltip:AddLine(("%d item%s with an old AH price queued for a MarketScribe scan (open the AH)."):format(queued, queued == 1 and "" or "s"), 0.4, 0.8, 1, true)
 	end
 	GameTooltip:AddLine(" ")
 	GameTooltip:AddLine(MenuUtil and "Right-click: exclude options" or
@@ -331,6 +354,12 @@ function ns.RefreshPlan()
 	smeltBtn:SetText(ns.db.planSmelt == false and "Smelt bars: off" or "Smelt bars: on")
 	deBtn:SetText(ns.db.planDE and "Disenchant: on" or "Disenchant: off")
 	filterBtn:SetText(FILTER_LABEL[ns.db.planFilter or "all"])
+	if current and ns.SPECS[current] then
+		specBtn:SetText("Specialization: " .. (ns.SpecName(current) or "none"))
+		specBtn:Show()
+	else
+		specBtn:Hide()
+	end
 
 	n = 0
 	if not current then
@@ -572,6 +601,30 @@ local function Build()
 	filterBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 	filterBtn:SetSize(110, 20)
 	filterBtn:SetPoint("TOPRIGHT", -12, -28) -- the profession buttons' row
+
+	specBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+	specBtn:SetSize(170, 20)
+	specBtn:SetPoint("RIGHT", filterBtn, "LEFT", -4, 0)
+	specBtn:SetScript("OnClick", function()
+		if not (current and ns.SPECS[current]) then return end
+		local list, cur = ns.SPECS[current], ns.SpecOf(current)
+		local nxt
+		if not cur then nxt = list[1][1]
+		else
+			for i, sp in ipairs(list) do
+				if sp[1] == cur then nxt = list[i + 1] and list[i + 1][1] break end
+			end
+		end
+		ns.SetSpec(current, nxt)
+		ns.RefreshPlan()
+	end)
+	specBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine("Specialization", 1, 1, 1)
+		GameTooltip:AddLine("Click to cycle. Specialization recipes are taught only by that specialty's trainer, so the plan leaves them out until you pick one. Pick the one you have (or intend to take); it's remembered per character.", nil, nil, nil, true)
+		GameTooltip:Show()
+	end)
+	specBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	recalcBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 	recalcBtn:SetSize(96, 20)
